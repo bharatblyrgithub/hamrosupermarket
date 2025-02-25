@@ -11,25 +11,12 @@ export default function CartPage() {
   const { data: session } = useSession();
   const router = useRouter();
 
-  const handleCheckout = async () => {
+  const handleCheckout = () => {
     if (!session) {
       router.push('/account?redirect=/cart');
       return;
     }
-
-    try {
-      // Here you would typically:
-      // 1. Create an order in your database
-      // 2. Integrate with a payment provider
-      // 3. Handle shipping information
-      // For now, we'll just show a success message
-      alert('Order placed successfully! (This is a demo)');
-      clearCart();
-      router.push('/account');
-    } catch (error) {
-      console.error('Checkout error:', error);
-      alert('Failed to process checkout. Please try again.');
-    }
+    router.push('/checkout');
   };
 
   if (items.length === 0) {
