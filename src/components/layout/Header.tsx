@@ -1,18 +1,46 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { useCart } from '../../context/CartContext';
 import CartDropdown from '../cart/CartDropdown';
+import ConfirmationDialog from '../ui/ConfirmationDialog';
 
 const Header = () => {
   const { data: session } = useSession();
   const { items, setIsDropdownOpen } = useCart();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  const [showLogoutPopup, setShowLogoutPopup] = useState(false);
+  const [showSignOutConfirmation, setShowSignOutConfirmation] = useState(false);
 
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+
+  useEffect(() => {
+    if (session) {
+      setShowWelcomePopup(true);
+      const timer = setTimeout(() => setShowWelcomePopup(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [session]);
+
+  const handleSignIn = async () => {
+    await signIn();
+  };
+
+  const handleSignOut = async () => {
+    setShowSignOutConfirmation(true);
+  };
+
+  const confirmSignOut = async () => {
+    await signOut();
+    setShowSignOutConfirmation(false);
+    setShowLogoutPopup(true);
+    const timer = setTimeout(() => setShowLogoutPopup(false), 3000);
+    return () => clearTimeout(timer);
+  };
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
@@ -91,7 +119,7 @@ const Header = () => {
                       </Link>
                     )}
                     <button
-                      onClick={() => signOut()}
+                      onClick={handleSignOut}
                       className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
                       Sign Out
@@ -100,12 +128,12 @@ const Header = () => {
                 )}
               </div>
             ) : (
-              <Link
-                href="/api/auth/signin"
+              <button
+                onClick={handleSignIn}
                 className="text-gray-700 hover:text-green-600"
               >
                 Sign In
-              </Link>
+              </button>
             )}
           </div>
         </div>
@@ -178,6 +206,23 @@ const Header = () => {
           </div>
         )}
       </nav>
+      {showWelcomePopup && (
+        <div className="fixed top-4 right-4 bg-green-500 text-white p-4 rounded-md shadow-lg">
+          Welcome back, {session?.user?.name}!
+        </div>
+      )}
+      {showLogoutPopup && (
+        <div className="fixed top-4 right-4 bg-blue-500 text-white p-4 rounded-md shadow-lg">
+          You have been successfully logged out.
+        </div>
+      )}
+      <ConfirmationDialog
+        isOpen={showSignOutConfirmation}
+        onClose={() => setShowSignOutConfirmation(false)}
+        onConfirm={confirmSignOut}
+        title="Confirm Sign Out"
+        message="Are you sure you want to sign out?"
+      />
     </header>
   );
 };

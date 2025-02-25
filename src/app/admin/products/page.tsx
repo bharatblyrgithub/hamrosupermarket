@@ -1,7 +1,8 @@
-  'use client';
+'use client';
 
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
+import ConfirmationDialog from '@/components/ui/ConfirmationDialog';
 
 interface Product {
   id: string;
@@ -29,6 +30,10 @@ export default function ProductsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [showEditConfirmation, setShowEditConfirmation] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
   const [formData, setFormData] = useState<FormData>({
     name: '',
     description: '',
@@ -46,10 +51,14 @@ export default function ProductsPage() {
   const fetchProducts = async () => {
     try {
       const response = await fetch('/api/admin/products');
+      if (!response.ok) {
+        throw new Error('Failed to fetch products');
+      }
       const data = await response.json();
       setProducts(data);
     } catch (error) {
       console.error('Error fetching products:', error);
+      alert('Failed to fetch products. Please try again later.');
     } finally {
       setIsLoading(false);
     }
@@ -66,6 +75,14 @@ export default function ProductsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Validate form data
+    const price = parseFloat(formData.price);
+    const stock = parseInt(formData.stock);
+    if (isNaN(price) || isNaN(stock) || price < 0 || stock < 0) {
+      alert('Please enter valid price and stock values.');
+      return;
+    }
+
     try {
       const url = editingProduct 
         ? `/api/admin/products/${editingProduct.id}`
@@ -80,8 +97,8 @@ export default function ProductsPage() {
         },
         body: JSON.stringify({
           ...formData,
-          price: parseFloat(formData.price),
-          stock: parseInt(formData.stock),
+          price,
+          stock,
         }),
       });
 
@@ -90,16 +107,7 @@ export default function ProductsPage() {
       }
 
       await fetchProducts();
-      setFormData({
-        name: '',
-        description: '',
-        price: '',
-        category: '',
-        stock: '',
-        unit: '',
-        image: ''
-      });
-      setEditingProduct(null);
+      resetForm();
       setIsModalOpen(false);
     } catch (error) {
       console.error('Error saving product:', error);
@@ -107,38 +115,65 @@ export default function ProductsPage() {
     }
   };
 
-  const handleEdit = (product: Product) => {
-    setEditingProduct(product);
+  const resetForm = () => {
     setFormData({
-      name: product.name,
-      description: product.description,
-      price: product.price.toString(),
-      category: product.category,
-      stock: product.stock.toString(),
-      unit: product.unit,
-      image: product.image
+      name: '',
+      description: '',
+      price: '',
+      category: '',
+      stock: '',
+      unit: '',
+      image: ''
     });
-    setIsModalOpen(true);
+    setEditingProduct(null);
   };
 
-  const handleDelete = async (productId: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) {
-      return;
-    }
+  const handleEdit = (product: Product) => {
+    setProductToEdit(product);
+    setShowEditConfirmation(true);
+  };
 
-    try {
-      const response = await fetch(`/api/admin/products/${productId}`, {
-        method: 'DELETE',
+  const confirmEdit = () => {
+    if (productToEdit) {
+      setEditingProduct(productToEdit);
+      setFormData({
+        name: productToEdit.name,
+        description: productToEdit.description,
+        price: productToEdit.price.toString(),
+        category: productToEdit.category,
+        stock: productToEdit.stock.toString(),
+        unit: productToEdit.unit,
+        image: productToEdit.image
       });
+      setIsModalOpen(true);
+      setShowEditConfirmation(false);
+      setProductToEdit(null);
+    }
+  };
 
-      if (!response.ok) {
-        throw new Error('Failed to delete product');
+  const handleDelete = (product: Product) => {
+    setProductToDelete(product);
+    setShowDeleteConfirmation(true);
+  };
+
+  const confirmDelete = async () => {
+    if (productToDelete) {
+      try {
+        const response = await fetch(`/api/admin/products/${productToDelete.id}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to delete product');
+        }
+
+        await fetchProducts();
+        setShowDeleteConfirmation(false);
+        setProductToDelete(null);
+      } catch (error) {
+        console.error('Error deleting product:', error);
+        alert('Failed to delete product. Please try again.');
       }
-
-      await fetchProducts();
-    } catch (error) {
-      console.error('Error deleting product:', error);
-      alert('Failed to delete product. Please try again.');
     }
   };
 
@@ -153,27 +188,17 @@ export default function ProductsPage() {
   return (
     <div className="h-full bg-gray-50 overflow-hidden">
       <div className="max-w-[95%] mx-auto py-4 h-full">
-        {/* Header with improved Add Product button */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-semibold text-gray-900">Products</h1>
-            <button
-              onClick={() => {
-                setEditingProduct(null);
-                setFormData({
-                  name: '',
-                  description: '',
-                  price: '',
-                  category: '',
-                  stock: '',
-                  unit: '',
-                  image: ''
-                });
-                setIsModalOpen(true);
-              }}
-              className="inline-flex items-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
-              title="Add new product"
-              aria-label="Add new product"
-            >
+          <button
+            onClick={() => {
+              resetForm();
+              setIsModalOpen(true);
+            }}
+            className="inline-flex items-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+            title="Add new product"
+            aria-label="Add new product"
+          >
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
             </svg>
@@ -181,7 +206,6 @@ export default function ProductsPage() {
           </button>
         </div>
 
-        {/* Products Table with fixed header */}
         <div className="bg-white shadow-md rounded-lg overflow-hidden">
           <div className="overflow-x-auto" style={{ height: 'calc(100vh - 240px)' }}>
             <table className="min-w-full divide-y divide-gray-200">
@@ -249,7 +273,7 @@ export default function ProductsPage() {
                           Edit
                         </button>
                         <button
-                          onClick={() => handleDelete(product.id)}
+                          onClick={() => handleDelete(product)}
                           className="inline-flex items-center text-red-600 hover:text-red-900"
                           title={`Delete ${product.name}`}
                           aria-label={`Delete ${product.name}`}
@@ -269,7 +293,6 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      {/* Add/Edit Product Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-lg w-full p-6">
@@ -409,6 +432,24 @@ export default function ProductsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmationDialog
+        isOpen={showDeleteConfirmation}
+        onClose={() => setShowDeleteConfirmation(false)}
+        onConfirm={confirmDelete}
+        title="Confirm Delete"
+        message={`Are you sure you want to delete ${productToDelete?.name}? This action cannot be undone.`}
+      />
+      <ConfirmationDialog
+        isOpen={showEditConfirmation}
+        onClose={() => {
+          setShowEditConfirmation(false);
+          setProductToEdit(null);
+        }}
+        onConfirm={confirmEdit}
+        title="Confirm Edit"
+        message={`Are you sure you want to edit ${productToEdit?.name}?`}
+      />
     </div>
   );
 }

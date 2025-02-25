@@ -12,6 +12,7 @@
   "dependencies": {
     "@prisma/client": "^5.7.1",
     "bcryptjs": "^2.4.3",
+    "critters": "^0.0.23",
     "date-fns": "^3.0.6",
     "lucide-react": "^0.294.0",
     "mongodb": "^6.3.0",

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import ConfirmationDialog from '../../../components/ui/ConfirmationDialog';
 
 interface OrderItem {
   id: string;
@@ -31,6 +32,9 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const { data: session } = useSession();
   const router = useRouter();
+  const [showStatusConfirmation, setShowStatusConfirmation] = useState(false);
+  const [orderToUpdate, setOrderToUpdate] = useState<{ id: string, status: string } | null>(null);
+  const [error, setError] = useState<string | null>(null); // State for error handling
 
   useEffect(() => {
     if (!session?.user || session.user.role !== 'ADMIN') {
@@ -45,35 +49,51 @@ export default function AdminOrdersPage() {
     try {
       const response = await fetch('/api/admin/orders');
       if (!response.ok) {
-        throw new Error('Failed to fetch orders');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch orders');
       }
       const data = await response.json();
       setOrders(data.orders);
     } catch (error) {
       console.error('Error fetching orders:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load orders. Please try again later.');
     } finally {
       setLoading(false);
     }
   };
 
-  const updateOrderStatus = async (orderId: string, status: string) => {
+  const handleStatusChange = (orderId: string, status: string) => {
+    setOrderToUpdate({ id: orderId, status });
+    setShowStatusConfirmation(true);
+  };
+
+  const confirmStatusUpdate = async () => {
+    if (!orderToUpdate) return;
+
     try {
-      const response = await fetch(`/api/admin/orders/${orderId}`, {
+      setError(null); // Clear any previous errors
+      
+      const response = await fetch(`/api/admin/orders?id=${orderToUpdate.id}&status=${orderToUpdate.status}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to update order status');
+        throw new Error(data.error || 'Failed to update order status');
       }
 
       // Refresh orders list
-      fetchOrders();
+      await fetchOrders();
+      setShowStatusConfirmation(false);
+      setOrderToUpdate(null);
     } catch (error) {
       console.error('Error updating order status:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update order status. Please try again later.');
+      // Keep the confirmation dialog open if there's an error
     }
   };
 
@@ -94,6 +114,8 @@ export default function AdminOrdersPage() {
     <div className="min-h-screen bg-gray-100 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-6">Manage Orders</h1>
+
+        {error && <div className="text-red-500">{error}</div>} {/* Display error message */}
 
         <div className="bg-white shadow-sm rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
@@ -150,7 +172,7 @@ export default function AdminOrdersPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                       <select
                         value={order.status}
-                        onChange={(e) => updateOrderStatus(order.id, e.target.value)}
+                        onChange={(e) => handleStatusChange(order.id, e.target.value)}
                         className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm rounded-md"
                         aria-label={`Update status for order ${order.id}`}
                         title={`Update status for order ${order.id}`}
@@ -169,6 +191,18 @@ export default function AdminOrdersPage() {
           </div>
         </div>
       </div>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={showStatusConfirmation}
+        onClose={() => {
+          setShowStatusConfirmation(false);
+          setOrderToUpdate(null);
+        }}
+        onConfirm={confirmStatusUpdate}
+        title="Confirm Status Update"
+        message={`Are you sure you want to update the status of order ${orderToUpdate?.id} to ${orderToUpdate?.status}?`}
+      />
     </div>
   );
 }
