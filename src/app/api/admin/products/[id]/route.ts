@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../auth/[...nextauth]/route";
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 interface RouteParams {
   params: {
@@ -14,10 +15,17 @@ export async function GET(request: Request, { params }: RouteParams) {
   try {
     const session = await getServerSession(authOptions);
     
-    if (!session || session.user.role !== "ADMIN") {
+    if (!session?.user?.email) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: "Unauthorized - Please log in" },
         { status: 401 }
+      );
+    }
+
+    if (session.user.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Forbidden - Admin access required" },
+        { status: 403 }
       );
     }
 
@@ -36,7 +44,11 @@ export async function GET(request: Request, { params }: RouteParams) {
 
     return NextResponse.json(product);
   } catch (error) {
-    console.error('Error fetching product:', error);
+    console.error('Error fetching product:', {
+      error,
+      productId: params.id,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -49,10 +61,17 @@ export async function PUT(request: Request, { params }: RouteParams) {
   try {
     const session = await getServerSession(authOptions);
     
-    if (!session || session.user.role !== "ADMIN") {
+    if (!session?.user?.email) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: "Unauthorized - Please log in" },
         { status: 401 }
+      );
+    }
+
+    if (session.user.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Forbidden - Admin access required" },
+        { status: 403 }
       );
     }
 
@@ -98,9 +117,16 @@ export async function PUT(request: Request, { params }: RouteParams) {
       }
     });
 
-    return NextResponse.json(updatedProduct);
+    return NextResponse.json({
+      success: true,
+      product: updatedProduct
+    });
   } catch (error) {
-    console.error('Error updating product:', error);
+    console.error('Error updating product:', {
+      error,
+      productId: params.id,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -110,20 +136,37 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
 // DELETE /api/admin/products/[id] - Delete a product
 export async function DELETE(request: Request, { params }: RouteParams) {
+  if (!params?.id) {
+    return NextResponse.json(
+      { error: "Missing product ID" },
+      { status: 400 }
+    );
+  }
+
   try {
     const session = await getServerSession(authOptions);
     
-    if (!session || session.user.role !== "ADMIN") {
+    if (!session?.user?.email) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: "Unauthorized - Please log in" },
         { status: 401 }
       );
     }
 
-    // Check if product exists
+    if (session.user.role !== "ADMIN") {
+      return NextResponse.json(
+        { error: "Forbidden - Admin access required" },
+        { status: 403 }
+      );
+    }
+
+    // Check if product exists and get its order items
     const existingProduct = await prisma.product.findUnique({
       where: {
         id: params.id
+      },
+      include: {
+        OrderItem: true
       }
     });
 
@@ -135,31 +178,64 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     }
 
     // Check if product is used in any orders
-    const orderItems = await prisma.orderItem.findFirst({
-      where: {
-        productId: params.id
-      }
-    });
-
-    if (orderItems) {
+    if (existingProduct.OrderItem.length > 0) {
       return NextResponse.json(
-        { error: "Cannot delete product as it is associated with orders" },
-        { status: 400 }
+        { 
+          error: "Cannot delete product",
+          message: "This product is associated with existing orders. Consider updating the stock to 0 instead of deleting."
+        },
+        { status: 409 }
       );
     }
 
-    // Delete product
-    await prisma.product.delete({
-      where: {
-        id: params.id
-      }
+    // Delete product using a transaction to ensure data consistency
+    const deletedProduct = await prisma.$transaction(async (tx) => {
+      // Delete any related records first (if any)
+      await tx.orderItem.deleteMany({
+        where: { productId: params.id }
+      });
+
+      // Then delete the product
+      return tx.product.delete({
+        where: { id: params.id }
+      });
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      message: "Product deleted successfully",
+      deletedProduct: {
+        id: deletedProduct.id,
+        name: deletedProduct.name
+      }
+    });
   } catch (error) {
-    console.error('Error deleting product:', error);
+    console.error('Error deleting product:', {
+      error,
+      productId: params.id,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2025') {
+        return NextResponse.json(
+          { error: "Product not found" },
+          { status: 404 }
+        );
+      }
+      if (error.code === 'P2003') {
+        return NextResponse.json(
+          { 
+            error: "Cannot delete product",
+            message: "This product is referenced by other records in the database"
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to delete product" },
       { status: 500 }
     );
   }

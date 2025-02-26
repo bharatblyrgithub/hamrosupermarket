@@ -25,6 +25,11 @@ interface FormData {
   image: string;
 }
 
+interface ErrorState {
+  visible: boolean;
+  message: string;
+}
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,6 +39,7 @@ export default function ProductsPage() {
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [showEditConfirmation, setShowEditConfirmation] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [error, setError] = useState<ErrorState>({ visible: false, message: '' });
   const [formData, setFormData] = useState<FormData>({
     name: '',
     description: '',
@@ -58,7 +64,10 @@ export default function ProductsPage() {
       setProducts(data);
     } catch (error) {
       console.error('Error fetching products:', error);
-      alert('Failed to fetch products. Please try again later.');
+      setError({
+        visible: true,
+        message: 'Failed to fetch products. Please try again later.'
+      });
     } finally {
       setIsLoading(false);
     }
@@ -74,12 +83,16 @@ export default function ProductsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError({ visible: false, message: '' });
     
     // Validate form data
     const price = parseFloat(formData.price);
     const stock = parseInt(formData.stock);
     if (isNaN(price) || isNaN(stock) || price < 0 || stock < 0) {
-      alert('Please enter valid price and stock values.');
+      setError({
+        visible: true,
+        message: 'Please enter valid price and stock values.'
+      });
       return;
     }
 
@@ -102,8 +115,10 @@ export default function ProductsPage() {
         }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to save product');
+        throw new Error(data.message || data.error || 'Failed to save product');
       }
 
       await fetchProducts();
@@ -111,7 +126,10 @@ export default function ProductsPage() {
       setIsModalOpen(false);
     } catch (error) {
       console.error('Error saving product:', error);
-      alert('Failed to save product. Please try again.');
+      setError({
+        visible: true,
+        message: error instanceof Error ? error.message : 'Failed to save product'
+      });
     }
   };
 
@@ -126,9 +144,11 @@ export default function ProductsPage() {
       image: ''
     });
     setEditingProduct(null);
+    setError({ visible: false, message: '' });
   };
 
   const handleEdit = (product: Product) => {
+    setError({ visible: false, message: '' });
     setProductToEdit(product);
     setShowEditConfirmation(true);
   };
@@ -152,28 +172,50 @@ export default function ProductsPage() {
   };
 
   const handleDelete = (product: Product) => {
+    setError({ visible: false, message: '' });
     setProductToDelete(product);
     setShowDeleteConfirmation(true);
   };
 
   const confirmDelete = async () => {
-    if (productToDelete) {
-      try {
-        const response = await fetch(`/api/admin/products/${productToDelete.id}`, {
-          method: 'DELETE',
-        });
+    if (!productToDelete) return;
 
-        if (!response.ok) {
-          throw new Error('Failed to delete product');
-        }
+    try {
+      const response = await fetch(`/api/admin/products/${productToDelete.id}`, {
+        method: 'DELETE',
+      });
 
-        await fetchProducts();
-        setShowDeleteConfirmation(false);
-        setProductToDelete(null);
-      } catch (error) {
-        console.error('Error deleting product:', error);
-        alert('Failed to delete product. Please try again.');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to delete product');
       }
+
+      // Remove the deleted product from the local state
+      setProducts(prevProducts => 
+        prevProducts.filter(p => p.id !== productToDelete.id)
+      );
+
+      setShowDeleteConfirmation(false);
+      setProductToDelete(null);
+
+      // Show success message
+      setError({
+        visible: true,
+        message: data.message || 'Product deleted successfully'
+      });
+
+      // Hide success message after 3 seconds
+      setTimeout(() => {
+        setError({ visible: false, message: '' });
+      }, 3000);
+
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      setError({
+        visible: true,
+        message: error instanceof Error ? error.message : 'Failed to delete product'
+      });
     }
   };
 
@@ -187,6 +229,44 @@ export default function ProductsPage() {
 
   return (
     <div className="h-full bg-gray-50 overflow-hidden">
+      {error.visible && (
+        <div className={`fixed top-4 right-4 px-4 py-3 rounded z-50 ${
+          error.message.includes('successfully') 
+            ? 'bg-green-100 border border-green-400 text-green-700'
+            : 'bg-red-100 border border-red-400 text-red-700'
+        }`}>
+          <div className="flex">
+            <div className="py-1">
+              <svg className={`h-6 w-6 mr-4 ${
+                error.message.includes('successfully')
+                  ? 'text-green-500'
+                  : 'text-red-500'
+              }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {error.message.includes('successfully') ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                )}
+              </svg>
+            </div>
+            <div>
+              <p className="font-bold">
+                {error.message.includes('successfully') ? 'Success' : 'Error'}
+              </p>
+              <p className="text-sm">{error.message}</p>
+            </div>
+            <button
+              onClick={() => setError({ visible: false, message: '' })}
+              className="ml-auto pl-3"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-[95%] mx-auto py-4 h-full">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-semibold text-gray-900">Products</h1>
@@ -435,20 +515,34 @@ export default function ProductsPage() {
 
       <ConfirmationDialog
         isOpen={showDeleteConfirmation}
-        onClose={() => setShowDeleteConfirmation(false)}
+        onClose={() => {
+          setShowDeleteConfirmation(false);
+          setProductToDelete(null);
+          setError({ visible: false, message: '' });
+        }}
         onConfirm={confirmDelete}
         title="Confirm Delete"
-        message={`Are you sure you want to delete ${productToDelete?.name}? This action cannot be undone.`}
+        message={
+          productToDelete 
+            ? `Are you sure you want to delete "${productToDelete.name}"? This action cannot be undone.`
+            : 'Are you sure you want to delete this product?'
+        }
       />
+
       <ConfirmationDialog
         isOpen={showEditConfirmation}
         onClose={() => {
           setShowEditConfirmation(false);
           setProductToEdit(null);
+          setError({ visible: false, message: '' });
         }}
         onConfirm={confirmEdit}
         title="Confirm Edit"
-        message={`Are you sure you want to edit ${productToEdit?.name}?`}
+        message={
+          productToEdit
+            ? `Are you sure you want to edit "${productToEdit.name}"?`
+            : 'Are you sure you want to edit this product?'
+        }
       />
     </div>
   );

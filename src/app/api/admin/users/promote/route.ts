@@ -1,21 +1,45 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../auth/[...nextauth]/route";
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
+import { Role, Prisma } from "@prisma/client";
 
 export async function POST(request: Request) {
   try {
     // Check if the requester is an admin
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "ADMIN") {
+    if (!session?.user?.email) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        { error: "Unauthorized - Please log in" },
         { status: 401 }
       );
     }
 
-    const body = await request.json();
-    const { userId } = body;
+    if (session.user.role !== Role.ADMIN) {
+      return NextResponse.json(
+        { error: "Forbidden - Admin access required" },
+        { status: 403 }
+      );
+    }
+
+    // Validate request body
+    let userId: string;
+    try {
+      const body = await request.json();
+      userId = body.userId;
+
+      if (!userId || typeof userId !== 'string') {
+        return NextResponse.json(
+          { error: "Missing or invalid user ID" },
+          { status: 400 }
+        );
+      }
+    } catch (parseError) {
+      return NextResponse.json(
+        { error: "Invalid request body" },
+        { status: 400 }
+      );
+    }
 
     // Prevent self-demotion
     if (userId === session.user.id) {
@@ -39,7 +63,7 @@ export async function POST(request: Request) {
     }
 
     // Toggle role between USER and ADMIN
-    const newRole = currentUser.role === "USER" ? "ADMIN" : "USER";
+    const newRole = currentUser.role === Role.USER ? Role.ADMIN : Role.USER;
 
     // Update user role
     const updatedUser = await prisma.user.update({
@@ -55,13 +79,30 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      ...updatedUser,
-      createdAt: updatedUser.createdAt.toISOString()
+      success: true,
+      user: {
+        ...updatedUser,
+        createdAt: updatedUser.createdAt.toISOString()
+      }
     });
   } catch (error) {
-    console.error('Error updating user role:', error);
+    console.error('Error updating user role:', {
+      error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
+    // Handle specific Prisma errors
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2025') {
+        return NextResponse.json(
+          { error: "User not found" },
+          { status: 404 }
+        );
+      }
+    }
+
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to update user role" },
       { status: 500 }
     );
   }
